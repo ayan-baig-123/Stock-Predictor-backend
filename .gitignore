@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+.env.local
+
+# Database
+db.sqlite3
+db.sqlite3-journal
+
+# Saved Trained Model Weights & Scalers
+trained_models/*.h5
+trained_models/*.pkl
+scalers/*.pkl
+
+# Django Static & Media files
+staticfiles/
+media/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+*.log
