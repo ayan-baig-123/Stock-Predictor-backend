@@ -23,3 +23,5 @@ lxml>=5.1.0
 # Natural Language Processing (NLP) & Sentiment Engine
 nltk>=3.8.1
 textblob>=0.18.0
+gunicorn>=21.2.0
+whitenoise>=6.6.0
