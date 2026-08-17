@@ -17,18 +17,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF info/warning logs
 
 logger = logging.getLogger(__name__)
 
-# Safe TensorFlow import check
-TF_AVAILABLE = False
-try:
-    import tensorflow as tf
-    from tensorflow.keras.models import Sequential, load_model
-    from tensorflow.keras.layers import LSTM, GRU, Dense, Dropout, Bidirectional, Input
-    from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-    from tensorflow.keras.optimizers import Adam
-    TF_AVAILABLE = True
-    logger.info("TensorFlow loaded successfully.")
-except Exception as tf_err:
-    logger.warning(f"TensorFlow initialization fallback mode active: {tf_err}")
+# Safe TensorFlow availability flag (No heavy imports at startup)
+TF_AVAILABLE = True
 
 from django.conf import settings
 from api.models import StockData, TrainedModel, PredictionResult
@@ -117,6 +107,11 @@ class LSTMModelService:
 
             if TF_AVAILABLE and len(X_train) > 5:
                 try:
+                    import tensorflow as tf
+                    from tensorflow.keras.models import Sequential
+                    from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
+                    from tensorflow.keras.optimizers import Adam
+
                     input_shape = (X_train.shape[1], X_train.shape[2])
                     model = Sequential()
                     model.add(Input(shape=input_shape))
@@ -139,6 +134,7 @@ class LSTMModelService:
                     # Save TF model
                     model_path = os.path.join(str(settings.MODELS_DIR), f"{ticker}_{model_type}.h5")
                     model.save(model_path)
+                    logger.info("TensorFlow model trained and saved successfully.")
                 except Exception as ex:
                     logger.warning(f"Keras fitting skipped: {ex}")
 
