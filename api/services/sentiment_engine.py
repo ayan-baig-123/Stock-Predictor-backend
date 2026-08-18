@@ -214,20 +214,10 @@ class SentimentEngine:
         scores = list(articles.values_list('sentiment_score', flat=True))
         overall = sum(scores) / len(scores) if scores else 0.0
 
-        # Determine overall label based on majority category vote & aggregate score
-        if bullish > neutral and bullish >= bearish:
-            overall_label = 'bullish'
-        elif bearish > bullish and bearish >= neutral:
-            overall_label = 'bearish'
-        elif neutral >= bullish and neutral >= bearish:
-            if overall > 0.05:
-                overall_label = 'bullish'
-            elif overall < -0.05:
-                overall_label = 'bearish'
-            else:
-                overall_label = 'neutral'
-        else:
-            overall_label = 'neutral'
+        # Determine overall label — pure majority vote
+        # Whichever category has the MOST articles wins the badge
+        counts = {'bullish': bullish, 'neutral': neutral, 'bearish': bearish}
+        overall_label = max(counts, key=counts.get)
 
         # Build sentiment trend (by date)
         from django.db.models import Avg
