@@ -1,9 +1,10 @@
 """
 Sentiment Analysis Engine using NLTK VADER + TextBlob.
-Supports multilingual text (Urdu, Roman Urdu, English) via auto-translation.
+Supports Urdu & Roman Urdu via built-in keyword dictionary (zero extra memory).
 Analyzes financial news text for market sentiment.
 """
 import logging
+import re
 from typing import Optional
 
 import nltk
@@ -21,42 +22,85 @@ except LookupError:
     nltk.download('vader_lexicon', quiet=True)
 
 
-def _translate_to_english(text: str) -> str:
+# ──────────────────────────────────────────────────────────────
+# Built-in Urdu & Roman Urdu Financial Keyword Dictionary
+# No extra libraries needed — zero memory overhead
+# ──────────────────────────────────────────────────────────────
+URDU_POSITIVE_KEYWORDS = [
+    # Roman Urdu
+    'munafa', 'faida', 'izafa', 'barh', 'achha', 'behtareen', 'shandar',
+    'kamyab', 'kamyabi', 'mazboot', 'buland', 'upar', 'tezi', 'zabardast',
+    'umeed', 'bharosa', 'kharido', 'invest', 'khushi', 'behtari', 'kamai',
+    'grow', 'growth', 'profit', 'acha', 'accha', 'best', 'great',
+    'positive', 'stable', 'recover', 'recovery', 'strong', 'boom',
+    'surge', 'rally', 'up', 'high', 'record', 'dividend',
+    # Urdu script
+    'منافع', 'فائدہ', 'اضافہ', 'بڑھ', 'اچھا', 'بہترین', 'شاندار',
+    'کامیاب', 'کامیابی', 'مضبوط', 'بلند', 'اوپر', 'تیزی', 'زبردست',
+    'امید', 'بھروسہ', 'خریدو', 'خوشی', 'بہتری', 'کمائی',
+]
+
+URDU_NEGATIVE_KEYWORDS = [
+    # Roman Urdu
+    'nuqsan', 'gir', 'gira', 'girr', 'kami', 'kharab', 'bura', 'girawat',
+    'dhoka', 'khatarnak', 'band', 'tabahi', 'barbadi', 'kamzor', 'neeche',
+    'mandi', 'sell', 'becho', 'fikar', 'pareshani', 'loss', 'danger',
+    'crash', 'problem', 'risk', 'weak', 'low', 'down', 'fail', 'worst',
+    'negative', 'decline', 'fall', 'drop', 'dump', 'recession',
+    # Urdu script
+    'نقصان', 'گر', 'گرا', 'کمی', 'خراب', 'برا', 'گراوٹ',
+    'دھوکا', 'خطرناک', 'بند', 'تباہی', 'بربادی', 'کمزور', 'نیچے',
+    'مندی', 'بیچو', 'فکر', 'پریشانی',
+]
+
+
+def _urdu_keyword_score(text: str) -> float:
     """
-    Detect language and translate non-English text to English.
-    Supports Urdu (ur), Roman Urdu, Hindi (hi), Arabic (ar), and others.
-    Falls back to original text if translation fails.
+    Score text using built-in Urdu/Roman Urdu keyword dictionary.
+    Returns a score between -1.0 and 1.0.
+    Zero extra memory — just a simple word lookup.
     """
-    if not text or not text.strip():
-        return text
+    if not text:
+        return 0.0
 
-    try:
-        from langdetect import detect, LangDetectException
-        try:
-            lang = detect(text)
-        except LangDetectException:
-            lang = 'en'
+    text_lower = text.lower().strip()
+    words = re.split(r'[\s,.\-!?؟،۔]+', text_lower)
 
-        # If already English, return as-is
-        if lang == 'en':
-            return text
+    pos_hits = sum(1 for w in words if w in URDU_POSITIVE_KEYWORDS)
+    neg_hits = sum(1 for w in words if w in URDU_NEGATIVE_KEYWORDS)
 
-        # Translate to English using deep-translator (Google Translate backend)
-        from deep_translator import GoogleTranslator
-        translated = GoogleTranslator(source='auto', target='en').translate(text)
-        logger.debug(f"Translated [{lang}] → [en]: '{text[:60]}' → '{translated[:60]}'")
-        return translated if translated else text
+    total_hits = pos_hits + neg_hits
+    if total_hits == 0:
+        return 0.0
 
-    except Exception as e:
-        logger.warning(f"Translation failed, using original text. Error: {e}")
-        return text
+    # Score = (positive - negative) / total, bounded [-1, 1]
+    return (pos_hits - neg_hits) / total_hits
+
+
+def _has_urdu_chars(text: str) -> bool:
+    """Check if text contains Urdu/Arabic script characters."""
+    return bool(re.search(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]', text))
+
+
+def _has_roman_urdu(text: str) -> bool:
+    """Check if text contains common Roman Urdu financial keywords."""
+    text_lower = text.lower()
+    roman_urdu_markers = [
+        'hai', 'hain', 'ka', 'ki', 'ke', 'ko', 'mein', 'se', 'par',
+        'ho', 'nahi', 'bohot', 'bahut', 'zyada', 'kam', 'acha', 'bura',
+        'karo', 'karna', 'raha', 'rahi', 'gaya', 'gayi', 'wala',
+        'munafa', 'nuqsan', 'tezi', 'mandi', 'girawat', 'kharido', 'becho',
+    ]
+    words = set(re.split(r'[\s,.\-!?]+', text_lower))
+    matches = sum(1 for m in roman_urdu_markers if m in words)
+    return matches >= 2  # At least 2 markers = likely Roman Urdu
 
 
 class SentimentEngine:
     """
     Sentiment analysis engine combining VADER and TextBlob
     for robust financial text analysis.
-    Supports Urdu, Roman Urdu, Hindi, Arabic via auto-translation.
+    Supports Urdu & Roman Urdu via built-in keyword dictionary.
     """
 
     # VADER instance (reused across calls)
@@ -124,10 +168,12 @@ class SentimentEngine:
     def analyze_sentiment_vader(text: str) -> dict:
         """
         Analyze sentiment using NLTK VADER.
-        Auto-translates non-English text to English before analysis.
+
+        VADER is specifically designed for social media / news text
+        and returns compound score in [-1, 1].
 
         Args:
-            text: Text to analyze (any language)
+            text: Text to analyze
 
         Returns:
             dict with compound, pos, neg, neu scores
@@ -135,11 +181,8 @@ class SentimentEngine:
         if not text or not text.strip():
             return {'compound': 0.0, 'pos': 0.0, 'neg': 0.0, 'neu': 1.0}
 
-        # Translate to English if needed
-        english_text = _translate_to_english(text)
-
         vader = SentimentEngine._get_vader()
-        scores = vader.polarity_scores(english_text)
+        scores = vader.polarity_scores(text)
 
         return {
             'compound': scores['compound'],
@@ -152,10 +195,11 @@ class SentimentEngine:
     def analyze_sentiment_textblob(text: str) -> dict:
         """
         Analyze sentiment using TextBlob.
-        Auto-translates non-English text to English before analysis.
+
+        TextBlob returns polarity [-1, 1] and subjectivity [0, 1].
 
         Args:
-            text: Text to analyze (any language)
+            text: Text to analyze
 
         Returns:
             dict with polarity and subjectivity scores
@@ -163,10 +207,7 @@ class SentimentEngine:
         if not text or not text.strip():
             return {'polarity': 0.0, 'subjectivity': 0.0}
 
-        # Translate to English if needed
-        english_text = _translate_to_english(text)
-
-        blob = TextBlob(english_text)
+        blob = TextBlob(text)
         return {
             'polarity': blob.sentiment.polarity,
             'subjectivity': blob.sentiment.subjectivity,
@@ -175,14 +216,14 @@ class SentimentEngine:
     @staticmethod
     def get_combined_sentiment(text: str) -> dict:
         """
-        Get combined sentiment from both VADER and TextBlob.
-        Supports Urdu, Roman Urdu, Hindi, Arabic via auto-translation.
+        Get combined sentiment from VADER, TextBlob, and Urdu keyword dictionary.
+        Supports English, Urdu script, and Roman Urdu — zero extra libraries.
 
-        Uses weighted average: 60% VADER + 40% TextBlob
-        (VADER is better for short news headlines).
+        Uses weighted average: 60% VADER + 40% TextBlob for English.
+        For Urdu/Roman Urdu: blends keyword score with VADER/TextBlob.
 
         Args:
-            text: Text to analyze (any language)
+            text: Text to analyze (English, Urdu, or Roman Urdu)
 
         Returns:
             dict with combined score, label, and individual scores
@@ -193,19 +234,24 @@ class SentimentEngine:
                 'label': 'neutral',
                 'vader_score': 0.0,
                 'textblob_score': 0.0,
-                'translated_text': '',
             }
 
-        # Translate once, reuse for both engines
-        english_text = _translate_to_english(text)
+        vader_result = SentimentEngine.analyze_sentiment_vader(text)
+        textblob_result = SentimentEngine.analyze_sentiment_textblob(text)
 
-        vader_result = SentimentEngine.analyze_sentiment_vader(english_text)
-        textblob_result = SentimentEngine.analyze_sentiment_textblob(english_text)
-
-        # Weighted combination (VADER weighted higher for news headlines)
         vader_score = vader_result['compound']
         textblob_score = textblob_result['polarity']
-        combined_score = (0.6 * vader_score) + (0.4 * textblob_score)
+
+        # Check if text is Urdu script or Roman Urdu
+        is_urdu = _has_urdu_chars(text) or _has_roman_urdu(text)
+
+        if is_urdu:
+            # Blend: 40% VADER + 20% TextBlob + 40% Urdu keyword dictionary
+            urdu_score = _urdu_keyword_score(text)
+            combined_score = (0.4 * vader_score) + (0.2 * textblob_score) + (0.4 * urdu_score)
+        else:
+            # English: 60% VADER + 40% TextBlob (original formula)
+            combined_score = (0.6 * vader_score) + (0.4 * textblob_score)
 
         # Determine label
         if combined_score > SentimentEngine.BULLISH_THRESHOLD:
@@ -220,7 +266,6 @@ class SentimentEngine:
             'label': label,
             'vader_score': round(vader_score, 4),
             'textblob_score': round(textblob_score, 4),
-            'translated_text': english_text if english_text != text else None,
             'vader_detail': vader_result,
             'textblob_detail': textblob_result,
         }
