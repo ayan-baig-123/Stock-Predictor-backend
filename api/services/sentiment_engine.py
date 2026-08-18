@@ -1,5 +1,6 @@
 """
 Sentiment Analysis Engine using NLTK VADER + TextBlob.
+Supports multilingual text (Urdu, Roman Urdu, English) via auto-translation.
 Analyzes financial news text for market sentiment.
 """
 import logging
@@ -20,10 +21,42 @@ except LookupError:
     nltk.download('vader_lexicon', quiet=True)
 
 
+def _translate_to_english(text: str) -> str:
+    """
+    Detect language and translate non-English text to English.
+    Supports Urdu (ur), Roman Urdu, Hindi (hi), Arabic (ar), and others.
+    Falls back to original text if translation fails.
+    """
+    if not text or not text.strip():
+        return text
+
+    try:
+        from langdetect import detect, LangDetectException
+        try:
+            lang = detect(text)
+        except LangDetectException:
+            lang = 'en'
+
+        # If already English, return as-is
+        if lang == 'en':
+            return text
+
+        # Translate to English using deep-translator (Google Translate backend)
+        from deep_translator import GoogleTranslator
+        translated = GoogleTranslator(source='auto', target='en').translate(text)
+        logger.debug(f"Translated [{lang}] → [en]: '{text[:60]}' → '{translated[:60]}'")
+        return translated if translated else text
+
+    except Exception as e:
+        logger.warning(f"Translation failed, using original text. Error: {e}")
+        return text
+
+
 class SentimentEngine:
     """
     Sentiment analysis engine combining VADER and TextBlob
     for robust financial text analysis.
+    Supports Urdu, Roman Urdu, Hindi, Arabic via auto-translation.
     """
 
     # VADER instance (reused across calls)
@@ -91,12 +124,10 @@ class SentimentEngine:
     def analyze_sentiment_vader(text: str) -> dict:
         """
         Analyze sentiment using NLTK VADER.
-
-        VADER is specifically designed for social media / news text
-        and returns compound score in [-1, 1].
+        Auto-translates non-English text to English before analysis.
 
         Args:
-            text: Text to analyze
+            text: Text to analyze (any language)
 
         Returns:
             dict with compound, pos, neg, neu scores
@@ -104,8 +135,11 @@ class SentimentEngine:
         if not text or not text.strip():
             return {'compound': 0.0, 'pos': 0.0, 'neg': 0.0, 'neu': 1.0}
 
+        # Translate to English if needed
+        english_text = _translate_to_english(text)
+
         vader = SentimentEngine._get_vader()
-        scores = vader.polarity_scores(text)
+        scores = vader.polarity_scores(english_text)
 
         return {
             'compound': scores['compound'],
@@ -118,11 +152,10 @@ class SentimentEngine:
     def analyze_sentiment_textblob(text: str) -> dict:
         """
         Analyze sentiment using TextBlob.
-
-        TextBlob returns polarity [-1, 1] and subjectivity [0, 1].
+        Auto-translates non-English text to English before analysis.
 
         Args:
-            text: Text to analyze
+            text: Text to analyze (any language)
 
         Returns:
             dict with polarity and subjectivity scores
@@ -130,7 +163,10 @@ class SentimentEngine:
         if not text or not text.strip():
             return {'polarity': 0.0, 'subjectivity': 0.0}
 
-        blob = TextBlob(text)
+        # Translate to English if needed
+        english_text = _translate_to_english(text)
+
+        blob = TextBlob(english_text)
         return {
             'polarity': blob.sentiment.polarity,
             'subjectivity': blob.sentiment.subjectivity,
@@ -140,18 +176,31 @@ class SentimentEngine:
     def get_combined_sentiment(text: str) -> dict:
         """
         Get combined sentiment from both VADER and TextBlob.
+        Supports Urdu, Roman Urdu, Hindi, Arabic via auto-translation.
 
         Uses weighted average: 60% VADER + 40% TextBlob
         (VADER is better for short news headlines).
 
         Args:
-            text: Text to analyze
+            text: Text to analyze (any language)
 
         Returns:
             dict with combined score, label, and individual scores
         """
-        vader_result = SentimentEngine.analyze_sentiment_vader(text)
-        textblob_result = SentimentEngine.analyze_sentiment_textblob(text)
+        if not text or not text.strip():
+            return {
+                'combined_score': 0.0,
+                'label': 'neutral',
+                'vader_score': 0.0,
+                'textblob_score': 0.0,
+                'translated_text': '',
+            }
+
+        # Translate once, reuse for both engines
+        english_text = _translate_to_english(text)
+
+        vader_result = SentimentEngine.analyze_sentiment_vader(english_text)
+        textblob_result = SentimentEngine.analyze_sentiment_textblob(english_text)
 
         # Weighted combination (VADER weighted higher for news headlines)
         vader_score = vader_result['compound']
@@ -171,6 +220,7 @@ class SentimentEngine:
             'label': label,
             'vader_score': round(vader_score, 4),
             'textblob_score': round(textblob_score, 4),
+            'translated_text': english_text if english_text != text else None,
             'vader_detail': vader_result,
             'textblob_detail': textblob_result,
         }
